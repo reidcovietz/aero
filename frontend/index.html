@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Aero</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap');
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #7ecfee;
+      overflow: hidden;
+      font-family: 'Nunito', 'Segoe UI', sans-serif;
+      cursor: none;
+    }
+
+    #renderCanvas {
+      width: 100vw; height: 100vh;
+      display: block;
+      touch-action: none;
+    }
+
+    /* Custom cursor */
+    #cursor {
+      position: fixed; width: 18px; height: 18px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.85);
+      border: 2px solid rgba(100,200,255,0.9);
+      box-shadow: 0 0 12px rgba(100,200,255,0.6), inset 0 1px 2px rgba(255,255,255,0.8);
+      pointer-events: none;
+      transform: translate(-50%, -50%);
+      z-index: 9999;
+      transition: width 0.12s, height 0.12s;
+    }
+
+    /* HUD */
+    #hud {
+      position: absolute; top: 0; left: 0; width: 100%;
+      padding: 20px 24px; pointer-events: none;
+      display: flex; gap: 24px;
+    }
+    .hud-card {
+      background: rgba(255,255,255,0.22);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255,255,255,0.55);
+      border-radius: 16px;
+      padding: 10px 20px;
+      box-shadow: 0 4px 24px rgba(80,160,220,0.18), inset 0 1px 0 rgba(255,255,255,0.7);
+    }
+    .hud-label {
+      font-size: 10px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.12em; color: rgba(40,100,160,0.7);
+    }
+    .hud-val {
+      font-size: 28px; font-weight: 900; color: #1a6fa0;
+      line-height: 1.1;
+      text-shadow: 0 1px 0 rgba(255,255,255,0.8);
+    }
+
+    /* Ring indicator arrow */
+    #ringArrow {
+      position: absolute;
+      width: 44px; height: 44px;
+      pointer-events: none;
+      transform-origin: center;
+      filter: drop-shadow(0 0 6px rgba(255,220,0,0.8));
+      display: none;
+    }
+
+    /* Screens */
+    .screen {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+    }
+    .screen.hidden { display: none; }
+
+    /* Glass card */
+    .glass-card {
+      background: rgba(255,255,255,0.28);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255,255,255,0.65);
+      border-radius: 28px;
+      padding: 40px 48px;
+      text-align: center;
+      box-shadow:
+        0 8px 32px rgba(80,160,220,0.22),
+        0 1px 0 rgba(255,255,255,0.8) inset,
+        0 -1px 0 rgba(100,180,230,0.15) inset;
+      max-width: 400px; width: 90%;
+    }
+
+    .logo {
+      font-size: 3.8rem; font-weight: 900;
+      color: #1a7ab5;
+      text-shadow: 0 2px 0 rgba(255,255,255,0.9), 0 4px 16px rgba(80,160,220,0.3);
+      letter-spacing: 0.15em;
+      margin-bottom: 4px;
+    }
+    .tagline {
+      font-size: 0.95rem; color: rgba(30,100,160,0.7);
+      font-weight: 600; margin-bottom: 28px;
+    }
+    .final-ring-count {
+      font-size: 5rem; font-weight: 900;
+      color: #1a7ab5;
+      text-shadow: 0 2px 0 rgba(255,255,255,0.9);
+      line-height: 1;
+    }
+    .final-label { font-size: 1rem; color: rgba(30,100,160,0.6); font-weight: 700; margin-bottom: 28px; }
+
+    .btn-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+
+    button {
+      padding: 12px 30px;
+      font-family: 'Nunito', sans-serif;
+      font-size: 0.95rem; font-weight: 800;
+      border: none; border-radius: 50px;
+      cursor: pointer;
+      letter-spacing: 0.06em;
+      transition: transform 0.12s, box-shadow 0.12s;
+    }
+    .btn-primary {
+      background: linear-gradient(180deg, #5dd0ff 0%, #1a9fe0 50%, #1488c0 100%);
+      color: #fff;
+      box-shadow: 0 3px 12px rgba(26,160,224,0.4), 0 1px 0 rgba(255,255,255,0.35) inset;
+      border: 1px solid rgba(255,255,255,0.3);
+    }
+    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(26,160,224,0.5); }
+
+    .btn-ghost {
+      background: rgba(255,255,255,0.35);
+      color: #1a6fa0;
+      border: 1px solid rgba(255,255,255,0.65);
+      box-shadow: 0 2px 8px rgba(80,160,220,0.12);
+    }
+    .btn-ghost:hover { transform: translateY(-2px); background: rgba(255,255,255,0.5); }
+
+    /* Leaderboard overlay */
+    #lbOverlay {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(100,180,230,0.3);
+      backdrop-filter: blur(6px);
+    }
+    #lbOverlay.hidden { display: none; }
+    #lbPanel {
+      background: rgba(255,255,255,0.28);
+      backdrop-filter: blur(24px);
+      border: 1px solid rgba(255,255,255,0.65);
+      border-radius: 28px;
+      padding: 36px 40px;
+      min-width: 360px; max-width: 460px; width: 90%;
+      box-shadow: 0 8px 32px rgba(80,160,220,0.22), 0 1px 0 rgba(255,255,255,0.8) inset;
+    }
+    #lbPanel h2 {
+      font-size: 1.5rem; font-weight: 900; color: #1a6fa0;
+      text-shadow: 0 1px 0 rgba(255,255,255,0.8);
+      margin-bottom: 20px; text-align: center;
+    }
+    #lbTable { width: 100%; border-collapse: collapse; }
+    #lbTable th { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: rgba(30,100,160,0.5); padding-bottom: 8px; text-align: left; font-weight: 700; }
+    #lbTable td { padding: 9px 4px; border-top: 1px solid rgba(100,180,230,0.18); color: #1a5080; font-weight: 600; }
+    #lbTable tr:first-child td { border-top: none; }
+    .lb-rank { width: 32px; opacity: 0.5; }
+    .lb-score { text-align: right; font-weight: 900; color: #1a7ab5; }
+
+    /* Name modal */
+    #nameModal {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(100,180,230,0.3); backdrop-filter: blur(6px);
+    }
+    #nameModal.hidden { display: none; }
+    #namePanel {
+      background: rgba(255,255,255,0.28); backdrop-filter: blur(24px);
+      border: 1px solid rgba(255,255,255,0.65); border-radius: 28px;
+      padding: 36px 40px; text-align: center;
+      box-shadow: 0 8px 32px rgba(80,160,220,0.22);
+      min-width: 300px;
+    }
+    #namePanel h2 { color: #1a7ab5; font-size: 1.4rem; margin-bottom: 8px; font-weight: 900; }
+    #namePanel p { color: rgba(30,100,160,0.65); font-size: 0.9rem; margin-bottom: 20px; font-weight: 600; }
+    #nameInput {
+      width: 100%; padding: 12px 16px; font-size: 1rem;
+      font-family: 'Nunito', sans-serif; font-weight: 700;
+      border-radius: 50px; border: 1px solid rgba(100,180,230,0.5);
+      background: rgba(255,255,255,0.55);
+      color: #1a5080; outline: none; margin-bottom: 16px;
+      text-align: center;
+    }
+    #nameInput:focus { border-color: #5dd0ff; box-shadow: 0 0 0 3px rgba(93,208,255,0.2); }
+
+    /* Skybox picker */
+    #skyboxPicker {
+      position: absolute; bottom: 20px; right: 20px;
+      background: rgba(255,255,255,0.22); backdrop-filter: blur(12px);
+      border: 1px solid rgba(255,255,255,0.55); border-radius: 14px;
+      padding: 10px 14px;
+    }
+    #skyboxPicker.hidden { display: none; }
+    #skyboxPicker label { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: rgba(30,100,160,0.6); margin-bottom: 6px; font-weight: 700; }
+    #skyboxSelect {
+      background: rgba(255,255,255,0.5); border: 1px solid rgba(100,180,230,0.4);
+      color: #1a5080; border-radius: 8px; padding: 5px 10px;
+      font-family: 'Nunito', sans-serif; font-weight: 700; font-size: 13px; cursor: pointer;
+    }
+
+    /* Controls hint */
+    #controlsHint {
+      position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+      background: rgba(255,255,255,0.22); backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.5); border-radius: 50px;
+      padding: 7px 18px; color: rgba(30,100,160,0.7); font-size: 12px;
+      font-weight: 700; pointer-events: none; letter-spacing: 0.04em;
+    }
+    #controlsHint.hidden { display: none; }
+  </style>
+</head>
+<body>
+  <canvas id="renderCanvas"></canvas>
+  <div id="cursor"></div>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div class="hud-card">
+      <div class="hud-label">Time</div>
+      <div class="hud-val" id="hudTime">30</div>
+    </div>
+    <div class="hud-card">
+      <div class="hud-label">Rings</div>
+      <div class="hud-val" id="hudScore">0</div>
+    </div>
+    <div class="hud-card" id="nextBonusCard">
+      <div class="hud-label">Next bonus</div>
+      <div class="hud-val" id="hudNextBonus">5</div>
+    </div>
+  </div>
+
+  <!-- Ring direction arrow -->
+  <svg id="ringArrow" viewBox="0 0 44 44">
+    <defs>
+      <radialGradient id="ag" cx="50%" cy="30%" r="60%">
+        <stop offset="0%" stop-color="#ffe234"/>
+        <stop offset="100%" stop-color="#f0a000"/>
+      </radialGradient>
+    </defs>
+    <polygon points="22,2 38,38 22,30 6,38" fill="url(#ag)" stroke="rgba(255,255,255,0.7)" stroke-width="1.5"/>
+  </svg>
+
+  <!-- Start screen -->
+  <div id="startScreen" class="screen">
+    <div class="glass-card">
+      <div class="logo">AERO</div>
+      <div class="tagline">Fly through the rings before time runs out</div>
+      <div class="btn-row">
+        <button class="btn-primary" onclick="Game.start()">FLY</button>
+        <button class="btn-ghost" onclick="showLeaderboard()">SCORES</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Game over -->
+  <div id="gameOverScreen" class="screen hidden">
+    <div class="glass-card">
+      <div class="tagline" style="margin-bottom:8px">TIME'S UP</div>
+      <div class="final-ring-count" id="finalScore">0</div>
+      <div class="final-label">rings</div>
+      <div class="btn-row">
+        <button class="btn-primary" onclick="Game.start()">FLY AGAIN</button>
+        <button class="btn-ghost" onclick="showLeaderboard()">SCORES</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Leaderboard overlay -->
+  <div id="lbOverlay" class="hidden">
+    <div id="lbPanel">
+      <h2>Top Flyers</h2>
+      <table id="lbTable">
+        <thead><tr><th class="lb-rank">#</th><th>Name</th><th class="lb-score">Rings</th></tr></thead>
+        <tbody id="lbBody"></tbody>
+      </table>
+      <div style="margin-top:20px; text-align:center">
+        <button class="btn-ghost" onclick="hideLeaderboard()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Name modal -->
+  <div id="nameModal" class="hidden">
+    <div id="namePanel">
+      <h2>New High Score!</h2>
+      <p>Enter your name for the board</p>
+      <input id="nameInput" type="text" placeholder="Your name" maxlength="20" />
+      <button class="btn-primary" style="width:100%" onclick="submitScore()">Save</button>
+    </div>
+  </div>
+
+  <!-- Skybox picker -->
+  <div id="skyboxPicker" class="hidden">
+    <label>Sky</label>
+    <select id="skyboxSelect" onchange="Game.setSkybox(this.value)">
+      <option value="day">☁ Day</option>
+      <option value="golden">🌅 Golden Hour</option>
+      <option value="dusk">🌆 Dusk</option>
+      <option value="night">🌙 Night</option>
+      <option value="storm">⛈ Storm</option>
+    </select>
+  </div>
+
+  <!-- Controls hint -->
+  <div id="controlsHint" class="hidden">Move mouse to steer &nbsp;·&nbsp; Space to boost</div>
+
+  <script src="https://cdn.babylonjs.com/babylon.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
