@@ -1,5 +1,22 @@
+# Dependencies
 node_modules/
 backend/node_modules/
-backend/leaderboard.json
+
+# Runtime data
+backend/data/leaderboard.json
+
+# Media (large files)
 *.mp4
+*.mov
+*.avi
+
+# OS
 .DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
+
+# Vercel
+.vercel
