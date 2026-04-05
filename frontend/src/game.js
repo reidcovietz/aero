@@ -14,11 +14,11 @@ const CFG = {
   spawnHeightMax:28,
   speedBase:     22,
   speedMult:     0.10,  // +10% per 5 rings
-  // Floaty mouse — velocity-based steering
-  steerAccel:    0.18,  // how fast velocity builds toward target
-  steerDrag:     0.88,  // how much velocity bleeds off each frame (lower = floatier)
-  steerMaxVel:   14,    // max lateral speed
-  mouseSmooth:   0.055, // low-pass on raw mouse input (lower = more lag/float)
+  // Slither.io style — player always flies toward mouse
+  turnRate:      2.8,   // radians/sec toward desired heading
+  maxPitch:      0.55,  // max up/down angle (radians)
+  maxYaw:        1.1,   // max left/right angle (radians) — full left/right = screen edge
+  mouseSmooth:   0.10,  // low-pass on raw mouse (lower = floatier lag)
 };
 
 // ─── Skybox presets ───────────────────────────────────────────────────────────
@@ -131,10 +131,8 @@ window.addEventListener('mousemove', e => {
   $cursor.style.top  = e.clientY + 'px';
 });
 
-// Velocity for floaty physics
-const vel = { x: 0, y: 0 };
-
-// (no keyboard steering — mouse only)
+// Player heading (accumulated from mouse, not reset each frame)
+const heading = { yaw: 0, pitch: 0 };
 
 // ─── Game object ──────────────────────────────────────────────────────────────
 const Game = window.Game = {
@@ -144,7 +142,10 @@ const Game = window.Game = {
     State.timeLeft = CFG.gameDuration;
     State.speed    = CFG.speedBase;
     State.running  = true;
-    vel.x = 0; vel.y = 0;
+    heading.yaw    = 0;
+    heading.pitch  = 0;
+    mouse.smoothX  = 0;
+    mouse.smoothY  = 0;
 
     $startScreen.classList.add('hidden');
     $gameOver.classList.add('hidden');
@@ -244,12 +245,27 @@ const Game = window.Game = {
       State.activeRing = null;
     }
 
-    const p = State.player ? State.player.position : new BABYLON.Vector3(0, 12, 0);
-    const angle  = Math.random() * Math.PI * 2;
-    const dist   = CFG.spawnMinDist + Math.random() * (CFG.spawnRadius - CFG.spawnMinDist);
-    const rx = p.x + Math.sin(angle) * dist;
-    const rz = p.z + Math.cos(angle) * dist;
-    const ry = CFG.spawnHeightMin + Math.random() * (CFG.spawnHeightMax - CFG.spawnHeightMin);
+    const p    = State.player ? State.player.position : new BABYLON.Vector3(0, 12, 0);
+    const dist = CFG.spawnMinDist + Math.random() * (CFG.spawnRadius - CFG.spawnMinDist);
+
+    // Spawn ahead of the player's current travel direction, with a random spread
+    const cosP = Math.cos(heading.pitch);
+    const fwdX = Math.sin(heading.yaw) * cosP;
+    const fwdY = Math.sin(heading.pitch);
+    const fwdZ = Math.cos(heading.yaw) * cosP;
+
+    // Random perpendicular offset so rings aren't dead-center every time
+    const spreadH = (Math.random() - 0.5) * 28;
+    const spreadV = (Math.random() - 0.5) * 16;
+
+    // Build a rough right and up vector
+    const rightX = Math.cos(heading.yaw);
+    const rightZ = -Math.sin(heading.yaw);
+
+    const rx = p.x + fwdX * dist + rightX * spreadH;
+    const ry = Math.max(CFG.spawnHeightMin,
+               Math.min(CFG.spawnHeightMax, p.y + fwdY * dist + spreadV));
+    const rz = p.z + fwdZ * dist + rightZ * spreadH;
 
     const torus = BABYLON.MeshBuilder.CreateTorus('ring', {
       diameter: CFG.ringRadius * 2,
@@ -258,7 +274,9 @@ const Game = window.Game = {
     }, scene);
     torus.material = matRing;
     torus.position.set(rx, ry, rz);
-    torus.rotation.x = Math.PI / 2;
+    // Orient ring to face the player's travel direction
+    torus.rotation.y = heading.yaw;
+    torus.rotation.x = heading.pitch;
 
     State.activeRing = torus;
   },
@@ -340,7 +358,7 @@ scene.registerBeforeRender(() => {
   const dt  = Math.min((now - _lastT) / 1000, 0.05);
   _lastT = now;
 
-  // Low-pass smooth the raw mouse input for extra floatiness
+  // Low-pass smooth raw mouse for floaty feel
   mouse.smoothX += (mouse.rawX - mouse.smoothX) * CFG.mouseSmooth * 60 * dt;
   mouse.smoothY += (mouse.rawY - mouse.smoothY) * CFG.mouseSmooth * 60 * dt;
 
@@ -353,32 +371,33 @@ scene.registerBeforeRender(() => {
 
   const p = State.player;
 
-  // Forward speed — base + 10% per milestone, no boost key
-  p.position.z += State.speed * dt;
+  // ── Slither.io steering ───────────────────────────────────────────────────
+  // Mouse position IS the desired heading — player always turns to face cursor
+  const desiredYaw   =  mouse.smoothX * CFG.maxYaw;
+  const desiredPitch = -mouse.smoothY * CFG.maxPitch;
 
-  // ── Floaty velocity-based steering ───────────────────────────────────────
-  // Accelerate velocity toward where mouse is pointing
-  const targetVX =  mouse.smoothX * CFG.steerMaxVel;
-  const targetVY = -mouse.smoothY * CFG.steerMaxVel * 0.7;
+  // Smoothly rotate heading toward desired (turnRate controls how snappy vs floaty)
+  heading.yaw   += (desiredYaw   - heading.yaw)   * CFG.turnRate * dt;
+  heading.pitch += (desiredPitch - heading.pitch) * CFG.turnRate * dt;
 
-  vel.x += (targetVX - vel.x) * CFG.steerAccel * 60 * dt;
-  vel.y += (targetVY - vel.y) * CFG.steerAccel * 60 * dt;
+  // Build direction vector from heading angles
+  const cosP = Math.cos(heading.pitch);
+  const dirX  =  Math.sin(heading.yaw) * cosP;
+  const dirY  =  Math.sin(heading.pitch);
+  const dirZ  =  Math.cos(heading.yaw) * cosP;
 
-  // Apply drag so it coasts and overshoots slightly
-  vel.x *= Math.pow(CFG.steerDrag, 60 * dt);
-  vel.y *= Math.pow(CFG.steerDrag, 60 * dt);
-
-  p.position.x += vel.x * dt;
-  p.position.y += vel.y * dt;
+  // Move player along their direction
+  p.position.x += dirX * State.speed * dt;
+  p.position.y += dirY * State.speed * dt;
+  p.position.z += dirZ * State.speed * dt;
 
   // Clamp altitude
   p.position.y = Math.max(1, Math.min(32, p.position.y));
 
-  // Bank / pitch visual — driven by actual velocity, not raw mouse
-  const targetRoll  = -(vel.x / CFG.steerMaxVel) * 0.6;
-  const targetPitch =  (vel.y / CFG.steerMaxVel) * 0.3;
-  p.rotation.z += (targetRoll  - p.rotation.z) * Math.min(dt * 5, 1);
-  p.rotation.x += (targetPitch - p.rotation.x) * Math.min(dt * 5, 1);
+  // Orient mesh to face travel direction + bank into turns
+  p.rotation.y = heading.yaw;
+  p.rotation.x = -heading.pitch;
+  p.rotation.z = -(heading.yaw - (desiredYaw * 0.5)) * 1.2; // lean into yaw delta
 
   // ── Ring HUD arrow ──────────────────────────────────────────────────────
   if (State.activeRing) {
