@@ -13,9 +13,12 @@ const CFG = {
   spawnHeightMin:3,
   spawnHeightMax:28,
   speedBase:     22,
-  speedBoost:    46,
-  steerSens:     0.22,  // how strongly mouse steers
-  mouseLerp:     0.08,  // smoothing factor
+  speedMult:     0.10,  // +10% per 5 rings
+  // Floaty mouse — velocity-based steering
+  steerAccel:    0.18,  // how fast velocity builds toward target
+  steerDrag:     0.88,  // how much velocity bleeds off each frame (lower = floatier)
+  steerMaxVel:   14,    // max lateral speed
+  mouseSmooth:   0.055, // low-pass on raw mouse input (lower = more lag/float)
 };
 
 // ─── Skybox presets ───────────────────────────────────────────────────────────
@@ -118,7 +121,7 @@ const State = {
 };
 
 // Mouse tracking — normalized -1..1 relative to center
-const mouse = { x: 0, y: 0, rawX: 0, rawY: 0 };
+const mouse = { smoothX: 0, smoothY: 0, rawX: 0, rawY: 0 };
 window.addEventListener('mousemove', e => {
   const cx = window.innerWidth  / 2;
   const cy = window.innerHeight / 2;
@@ -128,9 +131,10 @@ window.addEventListener('mousemove', e => {
   $cursor.style.top  = e.clientY + 'px';
 });
 
-const keys = {};
-window.addEventListener('keydown', e => { keys[e.code] = true; });
-window.addEventListener('keyup',   e => { keys[e.code] = false; });
+// Velocity for floaty physics
+const vel = { x: 0, y: 0 };
+
+// (no keyboard steering — mouse only)
 
 // ─── Game object ──────────────────────────────────────────────────────────────
 const Game = window.Game = {
@@ -140,6 +144,7 @@ const Game = window.Game = {
     State.timeLeft = CFG.gameDuration;
     State.speed    = CFG.speedBase;
     State.running  = true;
+    vel.x = 0; vel.y = 0;
 
     $startScreen.classList.add('hidden');
     $gameOver.classList.add('hidden');
@@ -335,9 +340,9 @@ scene.registerBeforeRender(() => {
   const dt  = Math.min((now - _lastT) / 1000, 0.05);
   _lastT = now;
 
-  // Smooth mouse
-  mouse.x += (mouse.rawX - mouse.x) * CFG.mouseLerp / dt * dt * 10;
-  mouse.y += (mouse.rawY - mouse.y) * CFG.mouseLerp / dt * dt * 10;
+  // Low-pass smooth the raw mouse input for extra floatiness
+  mouse.smoothX += (mouse.rawX - mouse.smoothX) * CFG.mouseSmooth * 60 * dt;
+  mouse.smoothY += (mouse.rawY - mouse.smoothY) * CFG.mouseSmooth * 60 * dt;
 
   // Skybox always follows player
   if (State.skyboxMesh && State.player) {
@@ -348,30 +353,32 @@ scene.registerBeforeRender(() => {
 
   const p = State.player;
 
-  // Speed
-  const boosting = keys['Space'] || keys['ShiftLeft'];
-  const targetSpd = boosting ? CFG.speedBoost : CFG.speedBase;
-  State.speed += (targetSpd - State.speed) * Math.min(dt * 5, 1);
-
-  // Forward
+  // Forward speed — base + 10% per milestone, no boost key
   p.position.z += State.speed * dt;
 
-  // Steer from mouse position (pointer acts as a target in the sky)
-  // mx, my in -1..1; steer toward where mouse points
-  const sx = mouse.rawX * CFG.steerSens * State.speed;
-  const sy = -mouse.rawY * CFG.steerSens * State.speed * 0.6;
+  // ── Floaty velocity-based steering ───────────────────────────────────────
+  // Accelerate velocity toward where mouse is pointing
+  const targetVX =  mouse.smoothX * CFG.steerMaxVel;
+  const targetVY = -mouse.smoothY * CFG.steerMaxVel * 0.7;
 
-  p.position.x += sx * dt;
-  p.position.y += sy * dt;
+  vel.x += (targetVX - vel.x) * CFG.steerAccel * 60 * dt;
+  vel.y += (targetVY - vel.y) * CFG.steerAccel * 60 * dt;
+
+  // Apply drag so it coasts and overshoots slightly
+  vel.x *= Math.pow(CFG.steerDrag, 60 * dt);
+  vel.y *= Math.pow(CFG.steerDrag, 60 * dt);
+
+  p.position.x += vel.x * dt;
+  p.position.y += vel.y * dt;
 
   // Clamp altitude
   p.position.y = Math.max(1, Math.min(32, p.position.y));
 
-  // Bank / pitch visual
-  const targetRoll  = -mouse.rawX * 0.55;
-  const targetPitch =  mouse.rawY * 0.3;
-  p.rotation.z += (targetRoll  - p.rotation.z) * Math.min(dt * 7, 1);
-  p.rotation.x += (targetPitch - p.rotation.x) * Math.min(dt * 7, 1);
+  // Bank / pitch visual — driven by actual velocity, not raw mouse
+  const targetRoll  = -(vel.x / CFG.steerMaxVel) * 0.6;
+  const targetPitch =  (vel.y / CFG.steerMaxVel) * 0.3;
+  p.rotation.z += (targetRoll  - p.rotation.z) * Math.min(dt * 5, 1);
+  p.rotation.x += (targetPitch - p.rotation.x) * Math.min(dt * 5, 1);
 
   // ── Ring HUD arrow ──────────────────────────────────────────────────────
   if (State.activeRing) {
@@ -390,10 +397,12 @@ scene.registerBeforeRender(() => {
         // Scored!
         State.score += 1;
 
-        // Every bonusEvery rings → +5 sec
+        // Every bonusEvery rings → +5 sec AND +10% speed (fixed, stacks)
         if (State.score % CFG.bonusEvery === 0) {
           State.timeLeft += CFG.bonusSeconds;
-          flashBonusText('+5 sec!');
+          State.speed = State.speed * (1 + CFG.speedMult);
+          const pct = Math.round((State.speed / CFG.speedBase - 1) * 100);
+          flashBonusText(`+5 sec  ·  ${pct}% faster`);
         }
 
         Game._updateHUD();
